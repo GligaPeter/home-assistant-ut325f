@@ -14,7 +14,10 @@ A local Bluetooth integration for the **UNI-T UT325F four-channel thermocouple t
 - iENV panel diagnostics: battery, unit, MIN/MAX mode, difference mode,
   50/60 Hz filter, logging interval, and stored-record count
 - Clock synchronization and measurement-memory export to CSV
-- iENV-compatible panel and channel setting actions
+- One-click memory download and clock synchronization on the device page
+- Direct controls for HOLD, automatic shutdown, internal logging, logging interval,
+  display unit, MIN/MAX, difference mode, mains filter, thermocouple types and offsets
+- Read-only Bluetooth, USB and backlight status
 - Automatic Bluetooth discovery
 - Works with a Home Assistant Bluetooth adapter or an ESPHome Bluetooth proxy
 - Local communication; no account or cloud connection
@@ -54,7 +57,13 @@ The integration uses the meter's BLE UART service:
 
 It subscribes to notifications, requests a measurement with `0x5E`, reassembles the meter's binary frame, and decodes four little-endian IEEE-754 temperatures. It also implements the verified iENV commands for device settings and stored measurements. The field previously labelled as internal temperature was removed because live testing showed that it duplicated T1 rather than the meter's actual ambient temperature.
 
-## Actions
+## Device controls
+
+The iENV-compatible everyday controls are available directly on the UT325F device
+page in Home Assistant. No YAML or Developer Tools input is needed for memory
+downloads, clock synchronization, or normal settings.
+
+## Advanced and destructive actions
 
 The integration registers these Home Assistant actions under `ut325f_ble`:
 
