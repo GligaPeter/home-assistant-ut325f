@@ -21,9 +21,20 @@ async def async_setup_entry(
     entities: list[SensorEntity] = [
         UT325FTemperatureSensor(coordinator, entry, i) for i in range(4)
     ]
-    entities.append(UT325FAmbientTemperatureSensor(coordinator, entry))
     entities.extend(UT325FProbeTypeSensor(coordinator, entry, i) for i in range(4))
     entities.extend(UT325FChannelStateSensor(coordinator, entry, i) for i in range(4))
+    entities.extend(
+        [
+            UT325FMetadataSensor(coordinator, entry, "memory", "Stored records"),
+            UT325FMetadataSensor(coordinator, entry, "battery", "Battery level"),
+            UT325FMetadataSensor(coordinator, entry, "firmware", "Firmware version"),
+            UT325FMetadataSensor(coordinator, entry, "unit", "Display unit"),
+            UT325FMetadataSensor(coordinator, entry, "mode", "MIN/MAX mode"),
+            UT325FMetadataSensor(coordinator, entry, "difference", "Difference mode"),
+            UT325FMetadataSensor(coordinator, entry, "frequency", "Mains filter"),
+            UT325FMetadataSensor(coordinator, entry, "interval", "Logging interval"),
+        ]
+    )
     async_add_entities(entities)
 
 
@@ -65,22 +76,6 @@ class UT325FTemperatureSensor(UT325FBaseSensor):
         }
 
 
-class UT325FAmbientTemperatureSensor(UT325FBaseSensor):
-    _attr_name = "Internal temperature"
-    _attr_device_class = SensorDeviceClass.TEMPERATURE
-    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
-    _attr_suggested_display_precision = 1
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    def __init__(self, coordinator, entry) -> None:
-        super().__init__(coordinator, entry)
-        self._attr_unique_id = f"{entry.unique_id}_internal_temperature"
-
-    @property
-    def native_value(self):
-        return self.coordinator.data.ambient_temperature
-
-
 class UT325FProbeTypeSensor(UT325FBaseSensor):
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = ["K", "J", "T", "E", "R", "S", "N", "B", "unknown"]
@@ -113,3 +108,46 @@ class UT325FChannelStateSensor(UT325FBaseSensor):
     @property
     def native_value(self):
         return self.coordinator.data.channel_states[self._channel]
+
+
+class UT325FMetadataSensor(UT325FBaseSensor):
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator, entry, key: str, name: str) -> None:
+        super().__init__(coordinator, entry)
+        self._key = key
+        self._attr_name = name
+        self._attr_unique_id = f"{entry.unique_id}_{key}"
+
+    @property
+    def native_value(self):
+        panel = self.coordinator.panel_settings
+        if self._key == "memory":
+            return self.coordinator.used_records
+        if self._key == "firmware":
+            return self.coordinator.firmware_version
+        if panel is None:
+            return None
+        values = {
+            "battery": panel.battery_level,
+            "unit": {0: "°C", 1: "°F", 2: "K"}.get(panel.unit, "unknown"),
+            "mode": {0: "normal", 1: "maximum", 2: "minimum", 3: "average"}.get(panel.min_max_mode, "unknown"),
+            "difference": {0: "normal", 1: "T1", 2: "T2", 3: "T3", 4: "T4"}.get(panel.difference_mode, "unknown"),
+            "frequency": "60 Hz" if panel.mains_frequency else "50 Hz",
+            "interval": panel.logging_interval,
+        }
+        return values[self._key]
+
+    @property
+    def extra_state_attributes(self):
+        panel = self.coordinator.panel_settings
+        if self._key != "battery" or panel is None:
+            return None
+        return {
+            "hold": panel.hold,
+            "bluetooth": panel.bluetooth,
+            "auto_power_off": panel.auto_power_off,
+            "logging": panel.logging,
+            "usb_connected": panel.usb_connected,
+            "backlight": panel.backlight,
+        }
