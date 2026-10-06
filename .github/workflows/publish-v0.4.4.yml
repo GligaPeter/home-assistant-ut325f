@@ -1,0 +1,26 @@
+name: Publish v0.4.4
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/publish-v0.4.4.yml
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish UT325F compatibility fix
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view v0.4.4 --repo "${{ github.repository }}" >/dev/null 2>&1 || \
+            gh release create v0.4.4 \
+              --repo "${{ github.repository }}" \
+              --target "${{ github.sha }}" \
+              --title "UNI-T UT325F BLE v0.4.4" \
+              --notes "Compatibility fix: accepts the UT325F live measurement frame across firmware variants with unreliable BLE length/type headers. Also reports useful timeout names. Memory download remains disabled for connection stability."
