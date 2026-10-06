@@ -111,8 +111,15 @@ class UT325FCoordinator(DataUpdateCoordinator[UT325FData]):
                 del self._buffer[:start]
             total = frame_size(self._buffer)
             if total is None or len(self._buffer) < total:
-                # The legacy 0x5E response was observed without all trailing bytes.
-                if self._buffer.startswith(FRAME_HEADER) and len(self._buffer) >= FRAME_SIZE:
+                # Only the legacy 0x5E live frame is known to have a broken
+                # length field. Memory pages are 1031 bytes long and normally
+                # arrive split over many BLE notifications; never truncate
+                # those pages to the 34-byte live-frame size.
+                if (
+                    len(self._buffer) >= 5
+                    and self._buffer[4] == 0x5E
+                    and len(self._buffer) >= FRAME_SIZE
+                ):
                     total = FRAME_SIZE
                 else:
                     return
