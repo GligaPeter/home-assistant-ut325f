@@ -13,9 +13,7 @@ A local Bluetooth integration for the **UNI-T UT325F four-channel thermocouple t
 - Channel status for every probe (`OK`, under-range, over-range, disconnected)
 - iENV panel diagnostics: battery, unit, MIN/MAX mode, difference mode,
   50/60 Hz filter, logging interval, and stored-record count
-- Clock synchronization and measurement-memory export to CSV
-- One-click memory download and clock synchronization on the device page
-- Browser-downloadable ZIP export containing the CSV (via the device visit link)
+- One-click clock synchronization on the device page
 - Protected internal-memory erase: arm for 30 seconds, then press erase
 - Direct controls for HOLD, automatic shutdown, internal logging, logging interval,
   display unit, MIN/MAX, difference mode, mains filter, thermocouple types and offsets
@@ -57,20 +55,24 @@ The integration uses the meter's BLE UART service:
 | Command write | `FF01` |
 | Measurement notifications | `FF02` |
 
-It subscribes to notifications, requests a measurement with `0x5E`, reassembles the meter's binary frame, and decodes four little-endian IEEE-754 temperatures. It also implements the verified iENV commands for device settings and stored measurements. The field previously labelled as internal temperature was removed because live testing showed that it duplicated T1 rather than the meter's actual ambient temperature.
+It subscribes to notifications, requests a measurement with `0x5E`, reassembles the meter's binary frame, and decodes four little-endian IEEE-754 temperatures. It also implements the verified iENV commands for device settings and memory management. The field previously labelled as internal temperature was removed because live testing showed that it duplicated T1 rather than the meter's actual ambient temperature.
 
 ## Device controls
 
 The iENV-compatible everyday controls are available directly on the UT325F device
-page in Home Assistant. No YAML or Developer Tools input is needed for memory
-downloads, clock synchronization, or normal settings.
+page in Home Assistant. No YAML or Developer Tools input is needed for clock
+synchronization or normal settings.
+
+> **Note:** Downloading or exporting stored measurements is not supported. The
+> experimental memory-download implementation was removed because it could make
+> the Bluetooth connection unstable. Internal logging, the stored-record count,
+> and protected memory erase remain available.
 
 ## Advanced and destructive actions
 
 The integration registers these Home Assistant actions under `ut325f_ble`:
 
 - `sync_clock`
-- `download_memory` (creates `/config/www/ut325f-memory-*.csv`)
 - `set_panel_settings`
 - `set_channel_settings`
 - `clear_memory` (requires `confirm: true`)
