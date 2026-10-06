@@ -1,0 +1,26 @@
+name: Publish v1.0.0
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/publish-v1.0.0.yml
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish first stable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view v1.0.0 --repo "${{ github.repository }}" >/dev/null 2>&1 || \
+            gh release create v1.0.0 \
+              --repo "${{ github.repository }}" \
+              --target "${{ github.sha }}" \
+              --title "UNI-T UT325F BLE v1.0.0" \
+              --notes "First stable release. Provides T1-T4 live measurements, diagnostics, clock synchronization, device settings, internal logging controls, stored-record count, and protected memory erase. Stored measurement download/export is not supported because the experimental implementation caused Bluetooth instability."
