@@ -1,15 +1,15 @@
 {
   "domain": "ut325f_ble",
   "name": "UNI-T UT325F BLE",
-  "version": "0.1.0",
-  "documentation": "https://meters.uni-trend.com/product/ut325f-4-channel-thermometer/",
-  "issue_tracker": "https://github.com/GligaPeter/home-assistant-ut325f/issues",
-  "codeowners": ["@GligaPeter"],
-  "config_flow": true,
-  "integration_type": "device",
-  "iot_class": "local_polling",
   "bluetooth": [
     {"local_name": "UT325F*"}
   ],
-  "dependencies": ["bluetooth"]
+  "codeowners": ["@GligaPeter"],
+  "config_flow": true,
+  "dependencies": ["bluetooth"],
+  "documentation": "https://meters.uni-trend.com/product/ut325f-4-channel-thermometer/",
+  "integration_type": "device",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/GligaPeter/home-assistant-ut325f/issues",
+  "version": "0.1.0"
 }
