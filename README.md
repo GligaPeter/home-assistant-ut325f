@@ -9,9 +9,12 @@ A local Bluetooth integration for the **UNI-T UT325F four-channel thermocouple t
 ## Features
 
 - Four temperature entities (`T1`–`T4`)
-- Internal cold-junction/ambient temperature diagnostic
 - Thermocouple type for every channel (`K`, `J`, `T`, `E`, `R`, `S`, `N`)
 - Channel status for every probe (`OK`, under-range, over-range, disconnected)
+- iENV panel diagnostics: battery, unit, MIN/MAX mode, difference mode,
+  50/60 Hz filter, logging interval, and stored-record count
+- Clock synchronization and measurement-memory export to CSV
+- iENV-compatible panel and channel setting actions
 - Automatic Bluetooth discovery
 - Works with a Home Assistant Bluetooth adapter or an ESPHome Bluetooth proxy
 - Local communication; no account or cloud connection
@@ -49,9 +52,20 @@ The integration uses the meter's BLE UART service:
 | Command write | `FF01` |
 | Measurement notifications | `FF02` |
 
-It subscribes to notifications, requests a measurement with `0x5E`, reassembles the meter's binary frame, and decodes four little-endian IEEE-754 temperatures. It also decodes the channel state/type bit fields and the internal cold-junction temperature documented by the vendor application.
+It subscribes to notifications, requests a measurement with `0x5E`, reassembles the meter's binary frame, and decodes four little-endian IEEE-754 temperatures. It also implements the verified iENV commands for device settings and stored measurements. The field previously labelled as internal temperature was removed because live testing showed that it duplicated T1 rather than the meter's actual ambient temperature.
 
-Potentially destructive commands such as clearing the meter's memory, factory reset, and calibration writes are deliberately not exposed.
+## Actions
+
+The integration registers these Home Assistant actions under `ut325f_ble`:
+
+- `sync_clock`
+- `download_memory` (creates `/config/www/ut325f-memory-*.csv`)
+- `set_panel_settings`
+- `set_channel_settings`
+- `clear_memory` (requires `confirm: true`)
+- `factory_reset` (requires `confirm: true`)
+
+The calibration and undocumented system commands merely declared in iENV are not sent, because their payload format cannot be verified safely.
 
 ## Troubleshooting
 
