@@ -9,6 +9,9 @@ A local Bluetooth integration for the **UNI-T UT325F four-channel thermocouple t
 ## Features
 
 - Four temperature entities (`T1`–`T4`)
+- Internal cold-junction/ambient temperature diagnostic
+- Thermocouple type for every channel (`K`, `J`, `T`, `E`, `R`, `S`, `N`)
+- Channel status for every probe (`OK`, under-range, over-range, disconnected)
 - Automatic Bluetooth discovery
 - Works with a Home Assistant Bluetooth adapter or an ESPHome Bluetooth proxy
 - Local communication; no account or cloud connection
@@ -46,7 +49,9 @@ The integration uses the meter's BLE UART service:
 | Command write | `FF01` |
 | Measurement notifications | `FF02` |
 
-It subscribes to notifications, requests a measurement with `0x5E`, reassembles the meter's binary frame, and decodes four little-endian IEEE-754 temperatures. A channel with status byte `0x30` is treated as disconnected.
+It subscribes to notifications, requests a measurement with `0x5E`, reassembles the meter's binary frame, and decodes four little-endian IEEE-754 temperatures. It also decodes the channel state/type bit fields and the internal cold-junction temperature documented by the vendor application.
+
+Potentially destructive commands such as clearing the meter's memory, factory reset, and calibration writes are deliberately not exposed.
 
 ## Troubleshooting
 
