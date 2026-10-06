@@ -1,0 +1,26 @@
+name: Publish v0.4.5
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/publish-v0.4.5.yml
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish UT325F live-output recovery
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view v0.4.5 --repo "${{ github.repository }}" >/dev/null 2>&1 || \
+            gh release create v0.4.5 \
+              --repo "${{ github.repository }}" \
+              --target "${{ github.sha }}" \
+              --title "UNI-T UT325F BLE v0.4.5" \
+              --notes "Fixes repeated measurement timeouts after an interrupted memory transfer or phone app leaves live output disabled. On the first timeout, the integration restores live output and retries the measurement on the same Bluetooth connection."
