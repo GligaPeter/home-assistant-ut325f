@@ -7,6 +7,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.network import get_url
 
 from .const import DOMAIN
 from .coordinator import UT325FCoordinator
@@ -49,6 +50,10 @@ class UT325FBaseSensor(CoordinatorEntity[UT325FCoordinator], SensorEntity):
             name="UNI-T UT325F",
             manufacturer="UNI-T",
             model="UT325F",
+            configuration_url=(
+                f"{get_url(coordinator.hass, prefer_external=False)}"
+                "/local/ut325f-memory-latest.zip"
+            ),
         )
 
 

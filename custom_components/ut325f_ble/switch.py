@@ -15,7 +15,9 @@ FIELDS = {
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(UT325FSwitch(coordinator, entry, key, name) for key, name in FIELDS.items())
+    entities = [UT325FSwitch(coordinator, entry, key, name) for key, name in FIELDS.items()]
+    entities.append(UT325FMemoryEraseArmSwitch(coordinator, entry))
+    async_add_entities(entities)
 
 
 class UT325FSwitch(UT325FEntity, SwitchEntity):
@@ -35,3 +37,22 @@ class UT325FSwitch(UT325FEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs) -> None:
         await self.coordinator.async_set_panel_field(self._field, False)
+
+
+class UT325FMemoryEraseArmSwitch(UT325FEntity, SwitchEntity):
+    _attr_name = "Enable memory erase (30 seconds)"
+    _attr_icon = "mdi:shield-alert"
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.unique_id}_memory_erase_arm"
+
+    @property
+    def is_on(self):
+        return self.coordinator.memory_erase_armed
+
+    async def async_turn_on(self, **kwargs) -> None:
+        await self.coordinator.async_arm_memory_erase(True)
+
+    async def async_turn_off(self, **kwargs) -> None:
+        await self.coordinator.async_arm_memory_erase(False)

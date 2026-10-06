@@ -5,6 +5,7 @@ import csv
 import logging
 import math
 import struct
+import zipfile
 from dataclasses import dataclass, replace
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -15,6 +16,7 @@ from homeassistant.components.bluetooth import async_ble_device_from_address
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.helpers.event import async_call_later
 
 from .const import (
     CHANNEL_STATES,
@@ -95,6 +97,8 @@ class UT325FCoordinator(DataUpdateCoordinator[UT325FData]):
         self._metadata_counter = 0
         self.last_memory_download_url: str | None = None
         self.last_memory_download_records: int | None = None
+        self.memory_erase_armed = False
+        self._erase_disarm = None
 
     def _notification(self, _sender, payload: bytearray) -> None:
         self._buffer.extend(payload)
@@ -197,6 +201,8 @@ class UT325FCoordinator(DataUpdateCoordinator[UT325FData]):
 
         stamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
         target = Path(self.hass.config.path("www", f"ut325f-memory-{stamp}.csv"))
+        archive = Path(self.hass.config.path("www", f"ut325f-memory-{stamp}.zip"))
+        latest = Path(self.hass.config.path("www", "ut325f-memory-latest.zip"))
 
         def _write_csv() -> None:
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -209,12 +215,41 @@ class UT325FCoordinator(DataUpdateCoordinator[UT325FData]):
                     writer.writerow(
                         [record.timestamp.isoformat(), *record.temperatures, *record.probe_types]
                     )
+            for zip_target in (archive, latest):
+                with zipfile.ZipFile(zip_target, "w", zipfile.ZIP_DEFLATED) as output:
+                    output.write(target, arcname=target.name)
 
         await self.hass.async_add_executor_job(_write_csv)
-        self.last_memory_download_url = f"/local/{target.name}"
+        self.last_memory_download_url = f"/local/{archive.name}"
         self.last_memory_download_records = min(len(records), used_count)
         self.async_update_listeners()
         return self.last_memory_download_url, self.last_memory_download_records
+
+    async def async_arm_memory_erase(self, armed: bool) -> None:
+        """Arm the destructive erase button for 30 seconds."""
+        if self._erase_disarm is not None:
+            self._erase_disarm()
+            self._erase_disarm = None
+        self.memory_erase_armed = armed
+        if armed:
+            self._erase_disarm = async_call_later(
+                self.hass, 30, self._async_disarm_memory_erase
+            )
+        self.async_update_listeners()
+
+    async def _async_disarm_memory_erase(self, _now) -> None:
+        self.memory_erase_armed = False
+        self._erase_disarm = None
+        self.async_update_listeners()
+
+    async def async_clear_memory(self) -> None:
+        """Erase stored readings only when explicitly armed."""
+        if not self.memory_erase_armed:
+            raise UpdateFailed("Előbb kapcsold be a memóriatörlés engedélyezését")
+        await self.async_send_confirmed_command(0x34)
+        await self.async_arm_memory_erase(False)
+        self.used_records = 0
+        self.async_update_listeners()
 
     async def async_send_confirmed_command(self, command: int) -> None:
         """Send a command whose confirmation is handled by the HA service schema."""
