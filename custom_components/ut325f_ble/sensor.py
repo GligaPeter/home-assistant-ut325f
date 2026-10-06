@@ -33,6 +33,7 @@ async def async_setup_entry(
             UT325FMetadataSensor(coordinator, entry, "difference", "Difference mode"),
             UT325FMetadataSensor(coordinator, entry, "frequency", "Mains filter"),
             UT325FMetadataSensor(coordinator, entry, "interval", "Logging interval"),
+            UT325FMetadataSensor(coordinator, entry, "export", "Last memory export"),
         ]
     )
     async_add_entities(entities)
@@ -126,6 +127,8 @@ class UT325FMetadataSensor(UT325FBaseSensor):
             return self.coordinator.used_records
         if self._key == "firmware":
             return self.coordinator.firmware_version
+        if self._key == "export":
+            return self.coordinator.last_memory_download_url
         if panel is None:
             return None
         values = {

@@ -8,7 +8,14 @@ from dataclasses import replace
 from .const import DOMAIN
 from .coordinator import UT325FCoordinator
 
-PLATFORMS = [Platform.SENSOR]
+PLATFORMS = [
+    Platform.BINARY_SENSOR,
+    Platform.BUTTON,
+    Platform.NUMBER,
+    Platform.SELECT,
+    Platform.SENSOR,
+    Platform.SWITCH,
+]
 
 
 def _coordinator_for_call(hass: HomeAssistant, call: ServiceCall) -> UT325FCoordinator:

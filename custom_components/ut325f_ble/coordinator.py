@@ -5,7 +5,7 @@ import csv
 import logging
 import math
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from datetime import datetime, timedelta
 
@@ -86,12 +86,15 @@ class UT325FCoordinator(DataUpdateCoordinator[UT325FData]):
         self._latest: UT325FData | None = None
         self._request_lock = asyncio.Lock()
         self._pending: dict[int, asyncio.Future[bytes]] = {}
+        self._memory_queue: asyncio.Queue[bytes] = asyncio.Queue()
         self.panel_settings: PanelSettings | None = None
         self.channel_settings: ChannelSettings | None = None
         self.used_records: int | None = None
         self.device_name: str | None = None
         self.firmware_version: str | None = None
         self._metadata_counter = 0
+        self.last_memory_download_url: str | None = None
+        self.last_memory_download_records: int | None = None
 
     def _notification(self, _sender, payload: bytearray) -> None:
         self._buffer.extend(payload)
@@ -114,6 +117,8 @@ class UT325FCoordinator(DataUpdateCoordinator[UT325FData]):
             if len(frame) < 5:
                 continue
             message_type = frame[4]
+            if message_type == 0x02:
+                self._memory_queue.put_nowait(frame)
             pending = self._pending.pop(message_type, None)
             if pending is not None and not pending.done():
                 pending.set_result(frame)
@@ -160,9 +165,35 @@ class UT325FCoordinator(DataUpdateCoordinator[UT325FData]):
         used_count = int.from_bytes(count_frame[5:9], "big")
         page_count = math.ceil(used_count / 32)
         records = []
-        for page in range(page_count):
-            payload = page.to_bytes(2, "big") + page_count.to_bytes(2, "big")
-            records.extend(parse_memory_page(await self.async_request(0x32, 0x02, payload, 15)))
+        panel = self.panel_settings
+        if panel is None:
+            panel = parse_panel_settings(await self.async_request(0x35, 0x06))
+            self.panel_settings = panel
+
+        stopped = replace(panel, live_output=False)
+        async with self._request_lock:
+            await self._connect()
+            while not self._memory_queue.empty():
+                self._memory_queue.get_nowait()
+            await self._client.write_gatt_char(
+                WRITE_UUID, build_frame(0x36, stopped.writable_payload()), response=False
+            )
+            await asyncio.sleep(0.6)
+            try:
+                payload = (0).to_bytes(2, "big") + page_count.to_bytes(2, "big")
+                await self._client.write_gatt_char(
+                    WRITE_UUID, build_frame(0x32, payload), response=False
+                )
+                pages: dict[int, bytes] = {}
+                while len(pages) < page_count:
+                    frame = await asyncio.wait_for(self._memory_queue.get(), timeout=8)
+                    pages[int.from_bytes(frame[5:7], "big")] = frame
+                for page in sorted(pages):
+                    records.extend(parse_memory_page(pages[page]))
+            finally:
+                await self._client.write_gatt_char(
+                    WRITE_UUID, build_frame(0x36, panel.writable_payload()), response=False
+                )
 
         stamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
         target = Path(self.hass.config.path("www", f"ut325f-memory-{stamp}.csv"))
@@ -180,7 +211,10 @@ class UT325FCoordinator(DataUpdateCoordinator[UT325FData]):
                     )
 
         await self.hass.async_add_executor_job(_write_csv)
-        return f"/local/{target.name}", min(len(records), used_count)
+        self.last_memory_download_url = f"/local/{target.name}"
+        self.last_memory_download_records = min(len(records), used_count)
+        self.async_update_listeners()
+        return self.last_memory_download_url, self.last_memory_download_records
 
     async def async_send_confirmed_command(self, command: int) -> None:
         """Send a command whose confirmation is handled by the HA service schema."""
@@ -197,6 +231,28 @@ class UT325FCoordinator(DataUpdateCoordinator[UT325FData]):
             await self._client.write_gatt_char(
                 WRITE_UUID, build_frame(command, payload), response=False
             )
+
+    async def async_set_panel_field(self, field: str, value) -> None:
+        if self.panel_settings is None:
+            await self._async_refresh_metadata()
+        if self.panel_settings is None:
+            raise UpdateFailed("A panelbeállítások nem olvashatók")
+        updated = replace(self.panel_settings, **{field: value})
+        await self.async_send_payload(0x36, updated.writable_payload())
+        self.panel_settings = updated
+        self.async_update_listeners()
+
+    async def async_set_channel_field(self, channel: int, field: str, value) -> None:
+        if self.channel_settings is None:
+            await self._async_refresh_metadata()
+        if self.channel_settings is None:
+            raise UpdateFailed("A csatornabeállítások nem olvashatók")
+        values = list(getattr(self.channel_settings, field))
+        values[channel] = value
+        updated = replace(self.channel_settings, **{field: tuple(values)})
+        await self.async_send_payload(0x38, updated.writable_payload())
+        self.channel_settings = updated
+        self.async_update_listeners()
 
     async def _connect(self) -> None:
         if self._client and self._client.is_connected:
