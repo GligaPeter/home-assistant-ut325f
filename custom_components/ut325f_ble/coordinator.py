@@ -133,15 +133,37 @@ class UT325FCoordinator(DataUpdateCoordinator[UT325FData]):
         """Send an iENV command and wait for its response frame."""
         async with self._request_lock:
             await self._connect()
-            future = self.hass.loop.create_future()
-            self._pending[response_type] = future
-            try:
-                await self._client.write_gatt_char(
-                    WRITE_UUID, build_frame(command, payload), response=False
-                )
-                return await asyncio.wait_for(future, timeout)
-            finally:
-                self._pending.pop(response_type, None)
+            return await self._async_request_locked(
+                command, response_type, payload, timeout
+            )
+
+    async def _async_request_locked(
+        self, command: int, response_type: int, payload: bytes = b"", timeout: float = 8
+    ) -> bytes:
+        """Send a framed command while the request lock is already held."""
+        future = self.hass.loop.create_future()
+        self._pending[response_type] = future
+        try:
+            await self._client.write_gatt_char(
+                WRITE_UUID, build_frame(command, payload), response=False
+            )
+            return await asyncio.wait_for(future, timeout)
+        finally:
+            self._pending.pop(response_type, None)
+
+    async def _async_restore_live_output_locked(self) -> None:
+        """Recover a meter left with live output disabled by an interrupted app."""
+        panel = parse_panel_settings(
+            await self._async_request_locked(0x35, 0x06, timeout=4)
+        )
+        self.panel_settings = panel
+        if not panel.live_output:
+            panel = replace(panel, live_output=True)
+            await self._client.write_gatt_char(
+                WRITE_UUID, build_frame(0x36, panel.writable_payload()), response=False
+            )
+            self.panel_settings = panel
+            await asyncio.sleep(0.2)
 
     async def async_sync_clock(self) -> None:
         """Set the meter clock to Home Assistant local time."""
@@ -234,9 +256,18 @@ class UT325FCoordinator(DataUpdateCoordinator[UT325FData]):
         try:
             async with self._request_lock:
                 await self._connect()
-                self._frame_event.clear()
-                await self._client.write_gatt_char(WRITE_UUID, b"\x5e", response=False)
-                await asyncio.wait_for(self._frame_event.wait(), timeout=4)
+                for attempt in range(2):
+                    self._frame_event.clear()
+                    await self._client.write_gatt_char(
+                        WRITE_UUID, b"\x5e", response=False
+                    )
+                    try:
+                        await asyncio.wait_for(self._frame_event.wait(), timeout=4)
+                        break
+                    except TimeoutError:
+                        if attempt:
+                            raise
+                        await self._async_restore_live_output_locked()
             if self._latest is None:
                 raise UpdateFailed("Nem érkezett értelmezhető mérési adat")
             self._metadata_counter += 1
