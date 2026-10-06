@@ -1,0 +1,76 @@
+sync_clock:
+  name: Synchronize clock
+  description: Set the UT325F date and time from Home Assistant.
+  fields:
+    config_entry_id:
+      name: Configuration entry
+      description: Optional when only one UT325F is configured.
+      selector:
+        text:
+
+download_memory:
+  name: Download measurement memory
+  description: Download stored measurements and create a CSV file under /config/www.
+  fields:
+    config_entry_id:
+      name: Configuration entry
+      description: Optional when only one UT325F is configured.
+      selector:
+        text:
+
+clear_memory:
+  name: Clear measurement memory
+  description: Permanently erase all measurements stored in the UT325F.
+  fields:
+    config_entry_id:
+      name: Configuration entry
+      selector:
+        text:
+    confirm:
+      name: Confirm
+      description: Must be enabled to perform this irreversible action.
+      required: true
+      selector:
+        boolean:
+
+factory_reset:
+  name: Factory reset
+  description: Reset the UT325F settings to their factory defaults.
+  fields:
+    config_entry_id:
+      name: Configuration entry
+      selector:
+        text:
+    confirm:
+      name: Confirm
+      description: Must be enabled to perform this destructive action.
+      required: true
+      selector:
+        boolean:
+
+set_panel_settings:
+  name: Set panel settings
+  description: Change the UT325F settings supported by the iENV application.
+  fields:
+    hold: {name: HOLD, selector: {boolean: {}}}
+    bluetooth: {name: Bluetooth, selector: {boolean: {}}}
+    auto_power_off: {name: Automatic power off, selector: {boolean: {}}}
+    logging: {name: Internal logging, selector: {boolean: {}}}
+    logging_interval: {name: Logging interval, selector: {number: {min: 1, max: 86400, mode: box}}}
+    min_max_mode: {name: MIN/MAX mode, selector: {select: {options: ["0", "1", "2", "3"]}}}
+    unit: {name: Unit, selector: {select: {options: ["0", "1", "2"]}}}
+    difference_mode: {name: Difference mode, selector: {select: {options: ["0", "1", "2", "3", "4"]}}}
+    mains_frequency: {name: Mains filter, selector: {select: {options: ["0", "1"]}}}
+
+set_channel_settings:
+  name: Set channel settings
+  description: Change thermocouple types and channel offsets. Types are K=0, J=1, T=2, E=3, R=4, S=5, N=6, B=7.
+  fields:
+    t1_type: {name: T1 type, selector: {number: {min: 0, max: 7, mode: box}}}
+    t2_type: {name: T2 type, selector: {number: {min: 0, max: 7, mode: box}}}
+    t3_type: {name: T3 type, selector: {number: {min: 0, max: 7, mode: box}}}
+    t4_type: {name: T4 type, selector: {number: {min: 0, max: 7, mode: box}}}
+    t1_offset: {name: T1 offset, selector: {number: {min: -5, max: 5, step: 0.1, unit_of_measurement: "°C"}}}
+    t2_offset: {name: T2 offset, selector: {number: {min: -5, max: 5, step: 0.1, unit_of_measurement: "°C"}}}
+    t3_offset: {name: T3 offset, selector: {number: {min: -5, max: 5, step: 0.1, unit_of_measurement: "°C"}}}
+    t4_offset: {name: T4 offset, selector: {number: {min: -5, max: 5, step: 0.1, unit_of_measurement: "°C"}}}
