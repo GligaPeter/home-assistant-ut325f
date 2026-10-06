@@ -103,16 +103,12 @@ class UT325FCoordinator(DataUpdateCoordinator[UT325FData]):
                 del self._buffer[:start]
             total = frame_size(self._buffer)
             if total is None or len(self._buffer) < total:
-                # Only the live-data response (type 0x01, requested with the
-                # legacy raw 0x5E command) is known to have a broken
-                # length field. Memory pages are 1031 bytes long and normally
-                # arrive split over many BLE notifications; never truncate
-                # those pages to the 34-byte live-frame size.
-                if (
-                    len(self._buffer) >= 5
-                    and self._buffer[4] == 0x01
-                    and len(self._buffer) >= FRAME_SIZE
-                ):
+                # The legacy live-data response to the raw 0x5E request has
+                # an unreliable length/type header on different firmware
+                # revisions. Memory transfer support is intentionally absent,
+                # so any response reaching the known 34-byte live-frame size
+                # can safely be decoded without waiting for a bogus length.
+                if self._buffer.startswith(FRAME_HEADER) and len(self._buffer) >= FRAME_SIZE:
                     total = FRAME_SIZE
                 else:
                     return
@@ -124,8 +120,6 @@ class UT325FCoordinator(DataUpdateCoordinator[UT325FData]):
             pending = self._pending.pop(message_type, None)
             if pending is not None and not pending.done():
                 pending.set_result(frame)
-            if message_type != 0x01:
-                continue
             try:
                 self._latest = parse_live_frame(frame)
             except ValueError:
@@ -258,7 +252,8 @@ class UT325FCoordinator(DataUpdateCoordinator[UT325FData]):
                 except Exception:
                     pass
                 self._client = None
-            raise UpdateFailed(f"UT325F Bluetooth-hiba: {err}") from err
+            detail = str(err) or err.__class__.__name__
+            raise UpdateFailed(f"UT325F Bluetooth-hiba: {detail}") from err
 
     async def _async_refresh_metadata(self) -> None:
         """Refresh the read-only settings exposed by the iENV application."""
