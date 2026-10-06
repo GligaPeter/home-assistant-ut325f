@@ -1,0 +1,9 @@
+{
+  "config": {
+    "step": {
+      "user": {"title": "UNI-T UT325F kiválasztása", "data": {"address": "Készülék"}},
+      "confirm": {"title": "UNI-T UT325F hozzáadása", "description": "Hozzáadod ezt a Bluetooth-hőmérőt a Home Assistanthoz?"}
+    },
+    "abort": {"not_found": "Nem található elérhető UT325F. Kapcsold be a műszer Bluetooth módját."}
+  }
+}

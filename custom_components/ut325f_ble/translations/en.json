@@ -1,0 +1,17 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Select a UNI-T UT325F",
+        "data": {"address": "Device"}
+      },
+      "confirm": {
+        "title": "Add UNI-T UT325F",
+        "description": "Add this Bluetooth thermometer to Home Assistant?"
+      }
+    },
+    "abort": {
+      "not_found": "No available UT325F was found. Enable Bluetooth mode on the thermometer and try again."
+    }
+  }
+}
