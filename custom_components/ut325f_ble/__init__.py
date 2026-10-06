@@ -1,6 +1,6 @@
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
+from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import entity_registry as er
 import voluptuous as vol
 from dataclasses import replace
@@ -36,10 +36,6 @@ async def _async_register_services(hass: HomeAssistant) -> None:
 
     async def sync_clock(call: ServiceCall) -> None:
         await _coordinator_for_call(hass, call).async_sync_clock()
-
-    async def download_memory(call: ServiceCall) -> dict:
-        url, records = await _coordinator_for_call(hass, call).async_download_memory()
-        return {"url": url, "records": records}
 
     async def destructive(call: ServiceCall) -> None:
         if call.data.get("confirm") is not True:
@@ -80,13 +76,6 @@ async def _async_register_services(hass: HomeAssistant) -> None:
         coordinator.async_update_listeners()
 
     hass.services.async_register(DOMAIN, "sync_clock", sync_clock, schema=schema)
-    hass.services.async_register(
-        DOMAIN,
-        "download_memory",
-        download_memory,
-        schema=schema,
-        supports_response=SupportsResponse.OPTIONAL,
-    )
     destructive_schema = vol.Schema(
         {vol.Optional("config_entry_id"): str, vol.Required("confirm"): bool}
     )
@@ -132,6 +121,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     if obsolete:
         registry.async_remove(obsolete)
+    for platform, unique_id in (
+        ("button", f"{entry.unique_id}_download_memory"),
+        ("sensor", f"{entry.unique_id}_export"),
+    ):
+        obsolete = registry.async_get_entity_id(platform, DOMAIN, unique_id)
+        if obsolete:
+            registry.async_remove(obsolete)
     coordinator = UT325FCoordinator(hass, entry)
     await coordinator.async_config_entry_first_refresh()
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator

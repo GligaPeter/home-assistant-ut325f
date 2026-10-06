@@ -1,13 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import csv
 import logging
-import math
 import struct
-import zipfile
 from dataclasses import dataclass, replace
-from pathlib import Path
 from datetime import datetime, timedelta
 
 from bleak import BleakClient
@@ -32,7 +28,6 @@ from .protocol import (
     build_frame,
     frame_size,
     parse_channel_settings,
-    parse_memory_page,
     parse_panel_settings,
 )
 
@@ -88,15 +83,12 @@ class UT325FCoordinator(DataUpdateCoordinator[UT325FData]):
         self._latest: UT325FData | None = None
         self._request_lock = asyncio.Lock()
         self._pending: dict[int, asyncio.Future[bytes]] = {}
-        self._memory_queue: asyncio.Queue[bytes] = asyncio.Queue()
         self.panel_settings: PanelSettings | None = None
         self.channel_settings: ChannelSettings | None = None
         self.used_records: int | None = None
         self.device_name: str | None = None
         self.firmware_version: str | None = None
         self._metadata_counter = 0
-        self.last_memory_download_url: str | None = None
-        self.last_memory_download_records: int | None = None
         self.memory_erase_armed = False
         self._erase_disarm = None
 
@@ -111,13 +103,14 @@ class UT325FCoordinator(DataUpdateCoordinator[UT325FData]):
                 del self._buffer[:start]
             total = frame_size(self._buffer)
             if total is None or len(self._buffer) < total:
-                # Only the legacy 0x5E live frame is known to have a broken
+                # Only the live-data response (type 0x01, requested with the
+                # legacy raw 0x5E command) is known to have a broken
                 # length field. Memory pages are 1031 bytes long and normally
                 # arrive split over many BLE notifications; never truncate
                 # those pages to the 34-byte live-frame size.
                 if (
                     len(self._buffer) >= 5
-                    and self._buffer[4] == 0x5E
+                    and self._buffer[4] == 0x01
                     and len(self._buffer) >= FRAME_SIZE
                 ):
                     total = FRAME_SIZE
@@ -128,8 +121,6 @@ class UT325FCoordinator(DataUpdateCoordinator[UT325FData]):
             if len(frame) < 5:
                 continue
             message_type = frame[4]
-            if message_type == 0x02:
-                self._memory_queue.put_nowait(frame)
             pending = self._pending.pop(message_type, None)
             if pending is not None and not pending.done():
                 pending.set_result(frame)
@@ -169,68 +160,6 @@ class UT325FCoordinator(DataUpdateCoordinator[UT325FData]):
             await self._client.write_gatt_char(
                 WRITE_UUID, build_frame(0x31, payload), response=False
             )
-
-    async def async_download_memory(self) -> tuple[str, int]:
-        """Download the meter memory and export it under /config/www."""
-        count_frame = await self.async_request(0x33, 0x05)
-        used_count = int.from_bytes(count_frame[5:9], "big")
-        page_count = math.ceil(used_count / 32)
-        records = []
-        panel = self.panel_settings
-        if panel is None:
-            panel = parse_panel_settings(await self.async_request(0x35, 0x06))
-            self.panel_settings = panel
-
-        stopped = replace(panel, live_output=False)
-        async with self._request_lock:
-            await self._connect()
-            while not self._memory_queue.empty():
-                self._memory_queue.get_nowait()
-            await self._client.write_gatt_char(
-                WRITE_UUID, build_frame(0x36, stopped.writable_payload()), response=False
-            )
-            await asyncio.sleep(0.6)
-            try:
-                payload = (0).to_bytes(2, "big") + page_count.to_bytes(2, "big")
-                await self._client.write_gatt_char(
-                    WRITE_UUID, build_frame(0x32, payload), response=False
-                )
-                pages: dict[int, bytes] = {}
-                while len(pages) < page_count:
-                    frame = await asyncio.wait_for(self._memory_queue.get(), timeout=8)
-                    pages[int.from_bytes(frame[5:7], "big")] = frame
-                for page in sorted(pages):
-                    records.extend(parse_memory_page(pages[page]))
-            finally:
-                await self._client.write_gatt_char(
-                    WRITE_UUID, build_frame(0x36, panel.writable_payload()), response=False
-                )
-
-        stamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
-        target = Path(self.hass.config.path("www", f"ut325f-memory-{stamp}.csv"))
-        archive = Path(self.hass.config.path("www", f"ut325f-memory-{stamp}.zip"))
-        latest = Path(self.hass.config.path("www", "ut325f-memory-latest.zip"))
-
-        def _write_csv() -> None:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with target.open("w", newline="", encoding="utf-8") as output:
-                writer = csv.writer(output)
-                writer.writerow(
-                    ["timestamp", "t1_c", "t2_c", "t3_c", "t4_c", "t1_type", "t2_type", "t3_type", "t4_type"]
-                )
-                for record in records[:used_count]:
-                    writer.writerow(
-                        [record.timestamp.isoformat(), *record.temperatures, *record.probe_types]
-                    )
-            for zip_target in (archive, latest):
-                with zipfile.ZipFile(zip_target, "w", zipfile.ZIP_DEFLATED) as output:
-                    output.write(target, arcname=target.name)
-
-        await self.hass.async_add_executor_job(_write_csv)
-        self.last_memory_download_url = f"/local/{archive.name}"
-        self.last_memory_download_records = min(len(records), used_count)
-        self.async_update_listeners()
-        return self.last_memory_download_url, self.last_memory_download_records
 
     async def async_arm_memory_erase(self, armed: bool) -> None:
         """Arm the destructive erase button for 30 seconds."""

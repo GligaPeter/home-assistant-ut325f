@@ -8,16 +8,6 @@ sync_clock:
       selector:
         text:
 
-download_memory:
-  name: Download measurement memory
-  description: Download stored measurements and create a CSV file under /config/www.
-  fields:
-    config_entry_id:
-      name: Configuration entry
-      description: Optional when only one UT325F is configured.
-      selector:
-        text:
-
 clear_memory:
   name: Clear measurement memory
   description: Permanently erase all measurements stored in the UT325F.

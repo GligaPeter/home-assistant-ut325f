@@ -11,23 +11,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     coordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
         [
-            UT325FDownloadButton(coordinator, entry),
             UT325FSyncClockButton(coordinator, entry),
             UT325FClearMemoryButton(coordinator, entry),
         ]
     )
-
-
-class UT325FDownloadButton(UT325FEntity, ButtonEntity):
-    _attr_name = "Download measurement memory"
-    _attr_icon = "mdi:download"
-
-    def __init__(self, coordinator, entry) -> None:
-        super().__init__(coordinator, entry)
-        self._attr_unique_id = f"{entry.unique_id}_download_memory"
-
-    async def async_press(self) -> None:
-        await self.coordinator.async_download_memory()
 
 
 class UT325FSyncClockButton(UT325FEntity, ButtonEntity):

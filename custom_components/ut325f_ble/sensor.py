@@ -7,7 +7,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from homeassistant.helpers.network import get_url
 
 from .const import DOMAIN
 from .coordinator import UT325FCoordinator
@@ -34,7 +33,6 @@ async def async_setup_entry(
             UT325FMetadataSensor(coordinator, entry, "difference", "Difference mode"),
             UT325FMetadataSensor(coordinator, entry, "frequency", "Mains filter"),
             UT325FMetadataSensor(coordinator, entry, "interval", "Logging interval"),
-            UT325FMetadataSensor(coordinator, entry, "export", "Last memory export"),
         ]
     )
     async_add_entities(entities)
@@ -50,10 +48,6 @@ class UT325FBaseSensor(CoordinatorEntity[UT325FCoordinator], SensorEntity):
             name="UNI-T UT325F",
             manufacturer="UNI-T",
             model="UT325F",
-            configuration_url=(
-                f"{get_url(coordinator.hass, prefer_external=False)}"
-                "/local/ut325f-memory-latest.zip"
-            ),
         )
 
 
@@ -132,8 +126,6 @@ class UT325FMetadataSensor(UT325FBaseSensor):
             return self.coordinator.used_records
         if self._key == "firmware":
             return self.coordinator.firmware_version
-        if self._key == "export":
-            return self.coordinator.last_memory_download_url
         if panel is None:
             return None
         values = {
