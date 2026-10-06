@@ -15,6 +15,8 @@ A local Bluetooth integration for the **UNI-T UT325F four-channel thermocouple t
   50/60 Hz filter, logging interval, and stored-record count
 - Clock synchronization and measurement-memory export to CSV
 - One-click memory download and clock synchronization on the device page
+- Browser-downloadable ZIP export containing the CSV (via the device visit link)
+- Protected internal-memory erase: arm for 30 seconds, then press erase
 - Direct controls for HOLD, automatic shutdown, internal logging, logging interval,
   display unit, MIN/MAX, difference mode, mains filter, thermocouple types and offsets
 - Read-only Bluetooth, USB and backlight status
