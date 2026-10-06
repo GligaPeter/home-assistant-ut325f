@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import csv
 import logging
+import math
 import struct
 from dataclasses import dataclass
-from datetime import timedelta
+from pathlib import Path
+from datetime import datetime, timedelta
 
 from bleak import BleakClient
 from bleak_retry_connector import establish_connection
@@ -21,16 +24,24 @@ from .const import (
     THERMOCOUPLE_TYPES,
     WRITE_UUID,
 )
+from .protocol import (
+    ChannelSettings,
+    PanelSettings,
+    build_frame,
+    frame_size,
+    parse_channel_settings,
+    parse_memory_page,
+    parse_panel_settings,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class UT325FData:
     temperatures: tuple[float | None, ...]
     channel_states: tuple[str, ...]
     thermocouple_types: tuple[str, ...]
-    ambient_temperature: float | None
 
 
 def parse_live_frame(frame: bytes) -> UT325FData:
@@ -53,14 +64,10 @@ def parse_live_frame(frame: bytes) -> UT325FData:
         states.append(state)
         probe_types.append(THERMOCOUPLE_TYPES.get(status_byte & 0x0F, "unknown"))
 
-    ambient = struct.unpack_from("<f", frame, 25)[0]
-    ambient_temperature = round(ambient, 2) if -100 <= ambient <= 150 else None
-
     return UT325FData(
         temperatures=tuple(temperatures),
         channel_states=tuple(states),
         thermocouple_types=tuple(probe_types),
-        ambient_temperature=ambient_temperature,
     )
 
 
@@ -77,26 +84,119 @@ class UT325FCoordinator(DataUpdateCoordinator[UT325FData]):
         self._buffer = bytearray()
         self._frame_event = asyncio.Event()
         self._latest: UT325FData | None = None
+        self._request_lock = asyncio.Lock()
+        self._pending: dict[int, asyncio.Future[bytes]] = {}
+        self.panel_settings: PanelSettings | None = None
+        self.channel_settings: ChannelSettings | None = None
+        self.used_records: int | None = None
+        self.device_name: str | None = None
+        self.firmware_version: str | None = None
+        self._metadata_counter = 0
 
     def _notification(self, _sender, payload: bytearray) -> None:
         self._buffer.extend(payload)
         while True:
-            start = self._buffer.find(FRAME_HEADER)
+            start = self._buffer.find(b"\xaa\x55")
             if start < 0:
-                self._buffer[:] = self._buffer[-4:]
+                self._buffer[:] = self._buffer[-1:]
                 return
-            if len(self._buffer) - start < FRAME_SIZE:
-                if start:
-                    del self._buffer[:start]
-                return
-            frame = bytes(self._buffer[start : start + FRAME_SIZE])
-            del self._buffer[: start + FRAME_SIZE]
+            if start:
+                del self._buffer[:start]
+            total = frame_size(self._buffer)
+            if total is None or len(self._buffer) < total:
+                # The legacy 0x5E response was observed without all trailing bytes.
+                if self._buffer.startswith(FRAME_HEADER) and len(self._buffer) >= FRAME_SIZE:
+                    total = FRAME_SIZE
+                else:
+                    return
+            frame = bytes(self._buffer[:total])
+            del self._buffer[:total]
+            if len(frame) < 5:
+                continue
+            message_type = frame[4]
+            pending = self._pending.pop(message_type, None)
+            if pending is not None and not pending.done():
+                pending.set_result(frame)
+            if message_type != 0x01:
+                continue
             try:
                 self._latest = parse_live_frame(frame)
             except ValueError:
                 _LOGGER.debug("Nem értelmezhető UT325F adatkeret", exc_info=True)
                 continue
             self._frame_event.set()
+
+    async def async_request(
+        self, command: int, response_type: int, payload: bytes = b"", timeout: float = 8
+    ) -> bytes:
+        """Send an iENV command and wait for its response frame."""
+        async with self._request_lock:
+            await self._connect()
+            future = self.hass.loop.create_future()
+            self._pending[response_type] = future
+            try:
+                await self._client.write_gatt_char(
+                    WRITE_UUID, build_frame(command, payload), response=False
+                )
+                return await asyncio.wait_for(future, timeout)
+            finally:
+                self._pending.pop(response_type, None)
+
+    async def async_sync_clock(self) -> None:
+        """Set the meter clock to Home Assistant local time."""
+        now = datetime.now().astimezone()
+        payload = bytes(
+            [now.year % 100, now.month, now.day, now.hour, now.minute, now.second]
+        )
+        async with self._request_lock:
+            await self._connect()
+            await self._client.write_gatt_char(
+                WRITE_UUID, build_frame(0x31, payload), response=False
+            )
+
+    async def async_download_memory(self) -> tuple[str, int]:
+        """Download the meter memory and export it under /config/www."""
+        count_frame = await self.async_request(0x33, 0x05)
+        used_count = int.from_bytes(count_frame[5:9], "big")
+        page_count = math.ceil(used_count / 32)
+        records = []
+        for page in range(page_count):
+            payload = page.to_bytes(2, "big") + page_count.to_bytes(2, "big")
+            records.extend(parse_memory_page(await self.async_request(0x32, 0x02, payload, 15)))
+
+        stamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
+        target = Path(self.hass.config.path("www", f"ut325f-memory-{stamp}.csv"))
+
+        def _write_csv() -> None:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with target.open("w", newline="", encoding="utf-8") as output:
+                writer = csv.writer(output)
+                writer.writerow(
+                    ["timestamp", "t1_c", "t2_c", "t3_c", "t4_c", "t1_type", "t2_type", "t3_type", "t4_type"]
+                )
+                for record in records[:used_count]:
+                    writer.writerow(
+                        [record.timestamp.isoformat(), *record.temperatures, *record.probe_types]
+                    )
+
+        await self.hass.async_add_executor_job(_write_csv)
+        return f"/local/{target.name}", min(len(records), used_count)
+
+    async def async_send_confirmed_command(self, command: int) -> None:
+        """Send a command whose confirmation is handled by the HA service schema."""
+        async with self._request_lock:
+            await self._connect()
+            await self._client.write_gatt_char(
+                WRITE_UUID, build_frame(command), response=False
+            )
+
+    async def async_send_payload(self, command: int, payload: bytes) -> None:
+        """Send a verified iENV settings command."""
+        async with self._request_lock:
+            await self._connect()
+            await self._client.write_gatt_char(
+                WRITE_UUID, build_frame(command, payload), response=False
+            )
 
     async def _connect(self) -> None:
         if self._client and self._client.is_connected:
@@ -111,12 +211,16 @@ class UT325FCoordinator(DataUpdateCoordinator[UT325FData]):
 
     async def _async_update_data(self) -> UT325FData:
         try:
-            await self._connect()
-            self._frame_event.clear()
-            await self._client.write_gatt_char(WRITE_UUID, b"\x5e", response=False)
-            await asyncio.wait_for(self._frame_event.wait(), timeout=4)
+            async with self._request_lock:
+                await self._connect()
+                self._frame_event.clear()
+                await self._client.write_gatt_char(WRITE_UUID, b"\x5e", response=False)
+                await asyncio.wait_for(self._frame_event.wait(), timeout=4)
             if self._latest is None:
                 raise UpdateFailed("Nem érkezett értelmezhető mérési adat")
+            self._metadata_counter += 1
+            if self._metadata_counter == 1 or self._metadata_counter % 12 == 0:
+                await self._async_refresh_metadata()
             return self._latest
         except UpdateFailed:
             raise
@@ -128,6 +232,26 @@ class UT325FCoordinator(DataUpdateCoordinator[UT325FData]):
                     pass
                 self._client = None
             raise UpdateFailed(f"UT325F Bluetooth-hiba: {err}") from err
+
+    async def _async_refresh_metadata(self) -> None:
+        """Refresh the read-only settings exposed by the iENV application."""
+        try:
+            self.panel_settings = parse_panel_settings(
+                await self.async_request(0x35, 0x06)
+            )
+            self.channel_settings = parse_channel_settings(
+                await self.async_request(0x37, 0x07)
+            )
+            used = await self.async_request(0x33, 0x05)
+            self.used_records = int.from_bytes(used[5:9], "big")
+            info = await self.async_request(0x00, 0x00)
+            if len(info) >= 27:
+                self.device_name = info[5:25].split(b"\x00", 1)[0].decode(
+                    "ascii", errors="replace"
+                )
+                self.firmware_version = f"{info[25]}.{info[26]}"
+        except Exception as err:
+            _LOGGER.debug("UT325F metadata refresh failed: %s", err)
 
     async def async_shutdown(self) -> None:
         if self._client:
