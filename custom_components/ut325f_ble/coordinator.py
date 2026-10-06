@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import struct
+from dataclasses import dataclass
 from datetime import timedelta
 
 from bleak import BleakClient
@@ -12,12 +13,58 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import FRAME_HEADER, FRAME_SIZE, NOTIFY_UUID, WRITE_UUID
+from .const import (
+    CHANNEL_STATES,
+    FRAME_HEADER,
+    FRAME_SIZE,
+    NOTIFY_UUID,
+    THERMOCOUPLE_TYPES,
+    WRITE_UUID,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class UT325FCoordinator(DataUpdateCoordinator[list[float | None]]):
+@dataclass(frozen=True, slots=True)
+class UT325FData:
+    temperatures: tuple[float | None, ...]
+    channel_states: tuple[str, ...]
+    thermocouple_types: tuple[str, ...]
+    ambient_temperature: float | None
+
+
+def parse_live_frame(frame: bytes) -> UT325FData:
+    """Decode the fields confirmed by the vendor application."""
+    if len(frame) < 34 or not frame.startswith(FRAME_HEADER):
+        raise ValueError("Invalid UT325F live-data frame")
+
+    status_bytes = frame[21:25]
+    temperatures: list[float | None] = []
+    states: list[str] = []
+    probe_types: list[str] = []
+
+    for channel, status_byte in enumerate(status_bytes):
+        state_code = (status_byte >> 4) & 0x0F
+        state = CHANNEL_STATES.get(state_code, "unknown")
+        value = struct.unpack_from("<f", frame, 5 + channel * 4)[0]
+        temperatures.append(
+            round(value, 2) if state == "ok" and -300 <= value <= 2000 else None
+        )
+        states.append(state)
+        probe_types.append(THERMOCOUPLE_TYPES.get(status_byte & 0x0F, "unknown"))
+
+    ambient = struct.unpack_from("<f", frame, 25)[0]
+    ambient_temperature = round(ambient, 2) if -100 <= ambient <= 150 else None
+
+    return UT325FData(
+        temperatures=tuple(temperatures),
+        channel_states=tuple(states),
+        thermocouple_types=tuple(probe_types),
+        ambient_temperature=ambient_temperature,
+    )
+
+
+class UT325FCoordinator(DataUpdateCoordinator[UT325FData]):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         super().__init__(
             hass,
@@ -29,7 +76,7 @@ class UT325FCoordinator(DataUpdateCoordinator[list[float | None]]):
         self._client: BleakClient | None = None
         self._buffer = bytearray()
         self._frame_event = asyncio.Event()
-        self._latest: list[float | None] | None = None
+        self._latest: UT325FData | None = None
 
     def _notification(self, _sender, payload: bytearray) -> None:
         self._buffer.extend(payload)
@@ -44,15 +91,11 @@ class UT325FCoordinator(DataUpdateCoordinator[list[float | None]]):
                 return
             frame = bytes(self._buffer[start : start + FRAME_SIZE])
             del self._buffer[: start + FRAME_SIZE]
-            statuses = frame[21:25]
-            values: list[float | None] = []
-            for channel in range(4):
-                if statuses[channel] == 0x30:
-                    values.append(None)
-                    continue
-                value = struct.unpack_from("<f", frame, 5 + channel * 4)[0]
-                values.append(round(value, 2) if -300 <= value <= 2000 else None)
-            self._latest = values
+            try:
+                self._latest = parse_live_frame(frame)
+            except ValueError:
+                _LOGGER.debug("Nem értelmezhető UT325F adatkeret", exc_info=True)
+                continue
             self._frame_event.set()
 
     async def _connect(self) -> None:
@@ -66,7 +109,7 @@ class UT325FCoordinator(DataUpdateCoordinator[list[float | None]]):
         )
         await self._client.start_notify(NOTIFY_UUID, self._notification)
 
-    async def _async_update_data(self) -> list[float | None]:
+    async def _async_update_data(self) -> UT325FData:
         try:
             await self._connect()
             self._frame_event.clear()
