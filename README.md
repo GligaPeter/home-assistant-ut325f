@@ -2,6 +2,12 @@
   <img src="icon.png" alt="UNI-T UT325F BLE icon" width="160">
 </p>
 
+<p align="center">
+  <a href="https://my.home-assistant.io/redirect/hacs_repository/?owner=GligaPeter&repository=home-assistant-ut325f&category=integration">
+    <img src="https://my.home-assistant.io/badges/hacs_repository.svg" alt="Open this repository in HACS">
+  </a>
+</p>
+
 # UNI-T UT325F BLE for Home Assistant
 
 A local Bluetooth integration for the **UNI-T UT325F four-channel thermocouple thermometer**. It exposes all four channels as temperature sensors in Home Assistant without the vendor app or a cloud service.
